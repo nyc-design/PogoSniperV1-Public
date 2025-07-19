@@ -1,0 +1,60 @@
+/* src/components/styles/PokemonFilter.css */
+
+.pokemon-filter-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.filter-actions {
+  display: flex;
+  gap: var(--space-sm);
+}
+.filter-actions button {
+  flex: 1;
+}
+
+.gen-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.gen-tabs button {
+  font-size: 12px;
+  padding: 4px 10px;
+  background: var(--c-secondary);
+  color: var(--c-text);
+  border: none;
+  border-radius: 999px; /* This makes the buttons pill-shaped */
+  font-weight: 500;
+}
+
+.gen-tabs button.active {
+  background: var(--c-accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.pokemon-list {
+  flex-grow: 1;
+  overflow-y: auto;
+  padding-right: 0.5rem; /* Space for scrollbar */
+  max-height: 40vh; /* Adjust as needed */
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm);
+  background: var(--c-bg);
+}
+
+.pokemon-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 4px;
+}
+
+.pokemon-item label {
+  cursor: pointer;
+  flex-grow: 1;
+}

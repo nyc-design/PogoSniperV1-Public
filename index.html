@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pogo Reveal Bot - Configuration</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 0;
+            display: flex;
+        }
+        .side-panel {
+            width: 250px;
+            background-color: #f4f4f4;
+            padding: 15px;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+        }
+        .main-content {
+            flex-grow: 1;
+            padding: 15px;
+        }
+        .config-section {
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #ddd;
+        }
+        .config-section h3 {
+            margin-top: 0;
+        }
+        .config-section label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        .config-section input[type="text"],
+        .config-section input[type="number"] {
+            width: calc(100% - 22px);
+            padding: 8px;
+            margin-bottom: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        .config-section button {
+            background-color: #5cb85c;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .pokemon-list-container {
+            max-height: 200px; /* Set a max height for scrollability */
+            overflow-y: auto; /* Enable vertical scrolling */
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            padding: 5px;
+            margin-bottom: 10px;
+        }
+        .pokemon-item {
+            margin-bottom: 5px;
+        }
+        .pokemon-item input[type="checkbox"] {
+            margin-right: 5px;
+        }
+        #pokemonSearch {
+            width: calc(100% - 22px); /* Adjust width similar to other inputs */
+        }
+        .config-section button:hover {
+            background-color: #4cae4c;
+        }
+    </style>
+</head>
+<body>
+    <div class="side-panel">
+        <h2>Configuration</h2>
+        <div class="config-section">
+            <h3>Geofence Settings</h3>
+            <label for="latitude">Latitude:</label>
+            <input type="number" id="latitude" step="any">
+
+            <label for="longitude">Longitude:</label>
+            <input type="number" id="longitude" step="any">
+
+            <label for="radius">Radius (KM):</label>
+            <input type="number" id="radius" step="any">
+
+            <button id="updateGeofence">Update Geofence</button>
+        </div>
+
+        <div class="config-section">
+            <h3>Pokémon Filtering</h3>
+            <input type="text" id="pokemonSearch" placeholder="Search Pokémon...">
+            <div class="pokemon-list-container" id="pokemonList">
+                <!-- Pokémon checkboxes will be loaded here by JavaScript -->
+            </div>
+            <button id="savePokemonFilter">Save Filter</button>
+        </div>
+        <!-- Add more configuration sections here -->
+    </div>
+    <div class="main-content">
+        <h1>Pogo Reveal Bot - Dashboard</h1>
+        <div class="config-section">
+            <h3>Bot Logs</h3>
+            <div id="logArea" style="height: 300px; overflow-y: scroll; border: 1px solid #ccc; padding: 10px;">
+                <!-- Logs will be displayed here -->
+            </div>
+        </div>
+        <!-- Main content goes here (e.g., logs, monitoring data) -->
+    </div>
+
+    <script>
+        // JavaScript will go here later to handle button clicks and API calls
+        let allPokemon = []; // Array to store all fetched Pokémon
+
+        function renderPokemonList(searchTerm = '') {
+            // Get the currently checked Pokémon from the DOM before clearing
+            const checkedPokemon = Array.from(document.querySelectorAll('#pokemonList input[type="checkbox"]:checked'))
+                .map(checkbox => checkbox.value);
+
+            const pokemonListContainer = document.getElementById('pokemonList');
+
+
+
+            pokemonListContainer.innerHTML = ''; // Clear the current list
+
+            const filteredPokemon = allPokemon.filter(pokemon =>
+                pokemon.toLowerCase().includes(searchTerm.toLowerCase())
+            );
+
+            filteredPokemon.forEach(p => {
+                const isChecked = checkedPokemon.includes(p) ? 'checked' : '';
+                div.innerHTML = `
+                    <input type="checkbox" id="${p.toLowerCase().replace(/[^a-z0-9]/g, '')}" name="pokemon" value="${p}" ${isChecked}>
+                    <label for="${p.toLowerCase().replace(/[^a-z0-9]/g, '')}">${p}</label>
+                `;
+
+
+                pokemonListContainer.appendChild(div);
+            });
+        }
+
+        // Function to fetch and display logs
+        function fetchAndDisplayLogs() {
+            fetch('/api/logs')
+                .then(response => response.json())
+                .then(logs => {
+                    const logArea = document.getElementById('logArea');
+                    logArea.innerHTML = ''; // Clear previous logs
+                    logs.forEach(log => {
+                        logArea.innerHTML += `<p>${log}</p>`;
+                    });
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // Fetch current geofence settings
+            fetch('/api/geofence')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('latitude').value = data.latitude;
+                    document.getElementById('longitude').value = data.longitude;
+                    document.getElementById('radius').value = data.radius;
+                })
+                .catch(error => console.error('Error fetching geofence:', error));
+
+            // Fetch and display Pokémon list
+            fetch('/api/pokemon')
+                .then(response => response.json())
+                .then(data => {
+                    allPokemon = data; // Store the fetched Pokémon data
+                    // After fetching all Pokémon, fetch the saved filter preferences
+                    return fetch('/api/filter/pokemon');
+                })
+                .then(response => response.json())
+                .then(savedFilter => {
+                    // Now render the list, marking the saved Pokémon as checked
+                    renderPokemonList(); // Render initially
+                    savedFilter.forEach(pokemonName => {
+                        const checkbox = document.querySelector(`#pokemonList input[value="${pokemonName}"]`);
+                        if (checkbox) checkbox.checked = true;
+                    });
+                })
+                .catch(error => console.error('Error fetching pokemon list:', error));
+            // Add event listener for search input
+            document.getElementById('pokemonSearch').addEventListener('input', (event) => {
+                const searchTerm = event.target.value.toLowerCase();
+                renderPokemonList(searchTerm); // Re-render the list based on search term
+            });
+
+            // Handle update button click
+            document.getElementById('updateGeofence').addEventListener('click', () => {
+                const latitude = document.getElementById('latitude').value;
+                const longitude = document.getElementById('longitude').value;
+                const radius = document.getElementById('radius').value;
+
+                fetch('/api/geofence', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        latitude: parseFloat(latitude),
+                        longitude: parseFloat(longitude),
+                        radius: parseFloat(radius)
+                    }),
+                })
+                .then(response => response.json())
+                .then(data => console.log('Geofence updated:', data))
+                .catch(error => console.error('Error updating geofence:', error));
+            });
+
+            // Placeholder for saving Pokémon filter
+            // This will be implemented in a later step
+            document.getElementById('savePokemonFilter').addEventListener('click', () => {
+                // Collect all checked Pokémon names
+                const selectedPokemon = Array.from(document.querySelectorAll('#pokemonList input[type="checkbox"]:checked'))
+                    .map(checkbox => checkbox.value);
+                console.log('Selected Pokémon:', selectedPokemon);
+                // Send selectedPokemon to backend
+                fetch('/api/filter/pokemon', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(selectedPokemon),
+                })
+                .then(response => response.json())
+                .then(data => console.log('Pokémon filter saved:', data))
+                .catch(error => console.error('Error saving Pokémon filter:', error));
+            });
+        });
+
+        // Fetch logs periodically
+        setInterval(fetchAndDisplayLogs, 3000); // Fetch logs every 3 seconds
+    </script>
+</body>
+</html>

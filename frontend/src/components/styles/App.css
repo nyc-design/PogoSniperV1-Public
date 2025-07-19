@@ -1,0 +1,9 @@
+/* src/styles/App.css */
+.app-shell { display: flex; flex-direction: column; height: 100vh; max-height: 100vh; }
+.app-header { flex-shrink: 0; padding: 0.75rem 1.5rem; border-bottom: 1px solid var(--c-border); display: flex; align-items: center; justify-content: space-between; background: var(--c-bg-card); }
+.app-header h1 { font-size: 1.25rem; font-weight: 600; }
+.app-main { flex-grow: 1; display: grid; grid-template-columns: minmax(320px, 400px) 1fr; gap: 1.5rem; padding: 1.5rem; overflow: hidden; }
+.app-sidebar, .app-content { overflow-y: auto; height: 100%; }
+.app-sidebar::-webkit-scrollbar, .app-content::-webkit-scrollbar { width: 8px; }
+.app-sidebar::-webkit-scrollbar-thumb, .app-content::-webkit-scrollbar-thumb { background: var(--c-border); border-radius: 4px; }
+.app-sidebar::-webkit-scrollbar-thumb:hover, .app-content::-webkit-scrollbar-thumb:hover { background: var(--c-accent); }

@@ -1,0 +1,21 @@
+/* src/styles/LogsPanel.css */
+.logs-panel-card { height: 100%; display: flex; flex-direction: column; }
+.logs-header { flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; padding-bottom: var(--space-md); border-bottom: 1px solid var(--c-border); }
+.logs-header h3 { margin: 0; }
+.logs-view { flex-grow: 1; overflow-y: auto; font-family: Consolas, Menlo, monospace; font-size: 13px; line-height: 1.4; }
+.log-line { white-space: pre-wrap; word-break: break-all; }
+.log-line .sev { font-weight: 600; margin-right: 1em; }
+.log-line.INFO { color: var(--c-text-muted); }
+.log-line.SUCCESS { color: #22c55e; }
+.log-line.ACTION { color: #60a5fa; }
+.log-line.WARN { color: #facc15; }
+.log-line.ERROR { color: #f87171; }
+.server-down-message {
+  padding: var(--space-md);
+  text-align: center;
+  color: var(--c-text-muted);
+  background: var(--c-bg);
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--c-border);
+  margin-bottom: var(--space-sm);
+}

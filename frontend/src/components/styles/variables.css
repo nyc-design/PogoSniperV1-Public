@@ -1,0 +1,32 @@
+/* src/components/styles/variables.css */
+:root {
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+
+  /* Light Theme (for reference) */
+  --c-bg: #f1f5f9;
+  --c-bg-card: #ffffff;
+  --c-text: #1e293b;
+  --c-text-muted: #64748b;
+  --c-accent: #16a34a; /* Green */
+  --c-accent-hover: #15803d;
+  --c-secondary: #e2e8f0;
+  --c-secondary-hover: #cbd5e1;
+  --c-border: #e2e8f0;
+}
+
+body.dark {
+  /* Dark Theme */
+  --c-bg: #0f172a;
+  --c-bg-card: #1e293b;
+  --c-border: #334155;
+  --c-text: #f8fafc;
+  --c-text-muted: #94a3b8;
+  --c-accent: #22c55e;
+  --c-accent-hover: #16a34a;
+  --c-secondary: #334155;
+  --c-secondary-hover: #475569;
+}

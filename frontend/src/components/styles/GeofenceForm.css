@@ -1,0 +1,64 @@
+/* src/components/styles/GeofenceForm.css */
+
+.geofence-card .card-header-with-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    /* Negative margin pulls the content below it closer */
+    margin: calc(-1 * var(--space-lg));
+    margin-bottom: var(--space-md);
+    padding: var(--space-md) var(--space-lg);
+    cursor: pointer;
+  }
+  
+  .collapse-toggle {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 1.1em;
+    color: var(--c-text-muted);
+  }
+  
+  .geofence-card .card-title {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+  
+  .gf-summary {
+    margin-left: auto;
+    font-size: 0.85em;
+    color: var(--c-text-muted);
+    font-weight: 400;
+  }
+  
+  .form-row {
+    margin-bottom: var(--space-md);
+  }
+  
+  .form-row label {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 500;
+    margin-bottom: 4px;
+    color: var(--c-text-muted);
+  }
+  
+  .geofence-actions {
+    display: flex;
+    gap: var(--space-sm);
+  }
+  
+  .geofence-actions button {
+    flex: 1;
+  }
+  
+  .btn-inline {
+    background: none;
+    border: none;
+    padding: 0;
+    margin-left: 0.5em;
+    font-size: 0.9em;
+    color: var(--c-accent);
+    cursor: pointer;
+    text-decoration: underline;
+  }
