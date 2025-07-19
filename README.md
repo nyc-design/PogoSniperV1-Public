@@ -40,6 +40,28 @@ spawns in your area.
    GEOFENCE_RADIUS_KM=10             # 0 to disable
    ```
 
+## 🎯 Running the Application
+The Easy Way (Windows)
+A start_dashboard.bat script is included in the root directory. Simply double-click it to launch both the backend and frontend servers in separate terminal windows.
+You can also create a desktop shortcut of this .bat file
+The Manual Way (All Platforms)
+You will need two separate terminals.
+1. In Terminal 1 (Backend):
+   # From the project's root directory
+      #  node Server-bot.js
+2. In Terminal 2 (Frontend):
+      # From the project's root directory
+     #    cd frontend
+     #    npm start
+
+## 🖥️ Using the Dashboard
+Pokémon Filter: Use the Gen tabs or the search bar to find Pokémon. Check the boxes for the ones you want to receive notifications for and click Save.
+Geofence: Enter the coordinates and radius for your filter and click Save Geofence.
+Logs: The logs panel will update automatically with the latest actions from the bot.
+Shutdown: To turn everything off, click the Shutdown Bot Server button in the UI, then close the frontend terminal window.
+
+
+
 ## ⚙️ Configuration
 
 | Variable             | Description                                          |
@@ -61,6 +83,10 @@ node bot.js
 * On startup, the bot will log in and begin listening.
 * When a "Reveal" button is spotted, it will click and parse coordinates.
 * If inside the geofence (or geofencing is disabled), you'll get a push via `ntfy.sh`.
+
+
+
+
 
 ## 🤝 Contributing
 
