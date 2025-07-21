@@ -1,17 +1,23 @@
 // src/App.jsx
-
 import React, { useState, useEffect } from 'react';
 import ThemeToggle   from './components/ThemeToggle.jsx';
 import GeofenceForm  from './components/GeofenceForm.jsx';
 import PokemonFilter from './components/PokemonFilter.jsx';
 import LogsPanel     from './components/LogsPanel.jsx';
-import ShutdownButton from './components/ShutdownButton.jsx'; // <-- Import the new component
-
+import DiscordIdsForm from './components/DiscordIdsForm.jsx';
+import ShutdownButton from './components/ShutdownButton.jsx';
 import './components/styles/App.css';
 
 export default function App() {
-  const [dark, setDark] = useState(/* ... */);
-  useEffect(() => { /* ... */ }, [dark]);
+  const [dark, setDark] = useState(() => {
+    const saved = localStorage.getItem('prefers-dark');
+    return saved !== null ? saved === 'true' : true;
+  });
+
+  useEffect(() => {
+    document.body.classList.toggle('dark', dark);
+    localStorage.setItem('prefers-dark', dark);
+  }, [dark]);
 
   return (
     <div className="app-shell">
@@ -23,7 +29,8 @@ export default function App() {
         <aside className="app-sidebar">
           <PokemonFilter />
           <GeofenceForm />
-          <ShutdownButton /> {/* <-- Add the button at the end of the sidebar */}
+          <DiscordIdsForm />
+          <ShutdownButton />
         </aside>
         <section className="app-content">
           <LogsPanel />
