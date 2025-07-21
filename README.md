@@ -129,4 +129,6 @@ Open a Pull Request
 
 Licensed under the MIT License.
 
-Built with ❤️ by Shrek
+---
+
+> Built with ❤️ by Shrek
