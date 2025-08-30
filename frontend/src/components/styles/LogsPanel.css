@@ -22,6 +22,19 @@
     margin: 0;
 }
 
+.logs-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.logs-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+
 .logs-view {
   flex-grow: 1;
   overflow-y: auto;
@@ -36,10 +49,31 @@
   word-break: break-word;
 }
 
-.log-line .sev {
-  font-weight: 600;
-  margin-right: 1em;
+.log-line .log-sprite {
+  width: 24px;
+  height: 24px;
+  vertical-align: -4px;
+  margin-right: 8px;
+  image-rendering: pixelated;
 }
+
+@media (min-width: 1024px) {
+  .log-line .log-sprite {
+    width: 28px;
+    height: 28px;
+  }
+}
+
+.log-line .sev {
+  font-weight: 700;
+  margin-right: 0.35em;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--c-border);
+}
+
+.sev-group { margin-right: 0.5em; }
 
 /* These classes are now added by LogsPanel.jsx */
 .log-line.INFO { color: #F0FFF0; }
@@ -48,8 +82,27 @@
 .log-line.WARN { color: var(--c-warn); }
 .log-line.ERROR { color: var(--c-error); }
 
+/* Tag chip colors */
+.sev.INFO { background: var(--c-secondary); color: var(--c-text); }
+.sev.SUCCESS { background: rgba(34,197,94,0.15); color: #22c55e; border-color: rgba(34,197,94,0.4); }
+.sev.ACTION { background: rgba(96,165,250,0.15); color: #60a5fa; border-color: rgba(96,165,250,0.4); }
+.sev.WARN { background: rgba(245,158,11,0.15); color: var(--c-warn); border-color: rgba(245,158,11,0.4); }
+.sev.ERROR { background: rgba(239,68,68,0.15); color: var(--c-error); border-color: rgba(239,68,68,0.4); }
+
 .server-down-message {
     text-align: center;
     padding: var(--space-lg);
     color: var(--c-text-muted);
 }
+
+/* Severity chip accents */
+.chip.INFO { border-color: rgba(96,165,250,0.35); }
+.chip.SUCCESS { border-color: rgba(34,197,94,0.35); }
+.chip.ACTION { border-color: rgba(96,165,250,0.35); }
+.chip.WARN { border-color: rgba(245,158,11,0.35); }
+.chip.ERROR { border-color: rgba(239,68,68,0.35); }
+.chip.active.INFO { background: rgba(96,165,250,0.25); color: #fff; }
+.chip.active.SUCCESS { background: rgba(34,197,94,0.25); color: #fff; }
+.chip.active.ACTION { background: rgba(96,165,250,0.25); color: #fff; }
+.chip.active.WARN { background: rgba(245,158,11,0.25); color: #fff; }
+.chip.active.ERROR { background: rgba(239,68,68,0.25); color: #fff; }

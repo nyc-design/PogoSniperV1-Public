@@ -1,32 +1,50 @@
 /* src/components/styles/variables.css */
 :root {
-  --radius-sm: 4px;
-  --radius-md: 6px;
+  /* Radii */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+
+  /* Spacing */
+  --space-xs: 6px;
   --space-sm: 8px;
   --space-md: 12px;
   --space-lg: 16px;
+  --space-xl: 24px;
 
-  /* Light Theme (for reference) */
-  --c-bg: #f1f5f9;
+  /* Elevation */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.06);
+  --shadow-md: 0 6px 18px rgba(0,0,0,0.08);
+
+  /* Light Theme */
+  --c-bg: #f6f7fb;
   --c-bg-card: #ffffff;
-  --c-text: #1e293b;
+  --c-text: #0f172a;
   --c-text-muted: #64748b;
-  --c-accent: #16a34a; /* Green */
+  --c-accent: #16a34a; /* green */
   --c-accent-hover: #15803d;
-  --c-secondary: #e2e8f0;
-  --c-secondary-hover: #cbd5e1;
-  --c-border: #e2e8f0;
+  --c-secondary: #e6ebf2;
+  --c-secondary-hover: #d8dee8;
+  --c-border: #e5e7eb;
+  --c-warn: #f59e0b;
+  --c-error: #ef4444;
+  --c-success: #22c55e;
+  --c-info: #60a5fa;
 }
 
 body.dark {
   /* Dark Theme */
-  --c-bg: #0f172a;
-  --c-bg-card: #1e293b;
-  --c-border: #334155;
-  --c-text: #f8fafc;
-  --c-text-muted: #94a3b8;
+  --c-bg: #0b1220;
+  --c-bg-card: #121a2b;
+  --c-border: #233046;
+  --c-text: #e7eef8;
+  --c-text-muted: #8ea2c6;
   --c-accent: #22c55e;
   --c-accent-hover: #16a34a;
-  --c-secondary: #334155;
-  --c-secondary-hover: #475569;
+  --c-secondary: #1c2537;
+  --c-secondary-hover: #243049;
+  --c-warn: #fbbf24;
+  --c-error: #f87171;
+  --c-success: #34d399;
+  --c-info: #93c5fd;
 }

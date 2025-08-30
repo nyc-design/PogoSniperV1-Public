@@ -6,6 +6,7 @@ import './styles/PokemonFilter.css'; // Correct path based on your file tree
 
 export default function PokemonFilter() {
     const [allPokemon, setAllPokemon] = useState({});
+    const [idByName, setIdByName] = useState({});
     const [selectedPokemon, setSelectedPokemon] = useState(new Set());
     const [searchTerm, setSearchTerm] = useState('');
     const [activeGen, setActiveGen] = useState('All');
@@ -22,6 +23,14 @@ export default function PokemonFilter() {
             const data = await res.json();
             if (!data.gens) throw new Error("Invalid data format from API");
             setAllPokemon(data.gens);
+
+            // Fetch id mapping once to render sprites
+            const dexRes = await fetch(`${API_BASE}/api/pokedex`);
+            if (dexRes.ok) {
+                const full = await dexRes.json();
+                const map = Object.fromEntries(full.map(x => [x.name, x.id]));
+                setIdByName(map);
+            }
 
             const filterRes = await fetch(`${API_BASE}/api/filter/pokemon`);
             if (!filterRes.ok) throw new Error(`HTTP error ${filterRes.status}`);
@@ -100,12 +109,17 @@ export default function PokemonFilter() {
             </div>
             {status && <div className="form-status">{status}</div>}
             <div className="pokemon-list">
-                {loading ? <p>Loading...</p> : visiblePokemon.map(p => (
-                    <div key={p} className="pokemon-item">
-                        <input id={`cb-${p}`} type="checkbox" checked={selectedPokemon.has(p)} onChange={() => handleToggle(p)} />
-                        <label htmlFor={`cb-${p}`}>{p}</label>
-                    </div>
-                ))}
+                {loading ? <p>Loading...</p> : visiblePokemon.map(p => {
+                    const id = idByName[p];
+                    const img = id ? `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${id}.png` : null;
+                    return (
+                        <div key={p} className="pokemon-item">
+                            {img && <img className="pk-sprite" src={img} alt="" width={24} height={24} loading="lazy" decoding="async" />}
+                            <input id={`cb-${p}`} type="checkbox" checked={selectedPokemon.has(p)} onChange={() => handleToggle(p)} />
+                            <label htmlFor={`cb-${p}`}>{p}</label>
+                        </div>
+                    );
+                })}
             </div>
         </div>
     );

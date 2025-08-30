@@ -54,6 +54,12 @@
   padding: 4px;
 }
 
+.pokemon-item .pk-sprite {
+  width: 24px;
+  height: 24px;
+  image-rendering: pixelated;
+}
+
 .pokemon-item label {
   cursor: pointer;
   flex-grow: 1;
