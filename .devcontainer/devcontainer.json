@@ -1,6 +1,6 @@
 {
   "name": "Dev Environment",
-  "image": "us-central1-docker.pkg.dev/coder-nt/workspace-images/base-dev:latest",
+  "image": "us-central1-docker.pkg.dev/coder-nt/workspace-images/nextjs-dev:latest",
   "customizations": {
     "vscode": {
       "settings": {
