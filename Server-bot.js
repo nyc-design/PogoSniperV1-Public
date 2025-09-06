@@ -355,13 +355,39 @@ async function sendNotification(lat, lng, metaOrName) {
     return;
   }
   try {
-    const headers = { Title: title, Click: deep, 'X-Deep-Link': 'true' };
     let pokemonId;
     if (name && pokemonNameToIdMap.has(name)) {
       pokemonId = pokemonNameToIdMap.get(name);
       // No attachment/icon to keep notifications text-only as requested
     }
-    await fetch(`https://ntfy.sh/${NTFY_TOPIC}`, { method: 'POST', body: body || ' ', headers });
+    
+    // Use JSON format with actions array for better iOS linking
+    const payload = {
+      topic: NTFY_TOPIC,
+      title: title,
+      message: body || ' ',
+      cache: false, // Don't cache the message
+      actions: [
+        {
+          action: "view",
+          label: "Open Location", 
+          url: deep,
+          clear: true
+        }
+      ]
+    };
+    
+    const response = await fetch(`https://ntfy.sh/`, { 
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    
+    // Get the message ID for potential future reference
+    const messageId = response.headers.get('X-Message-Id');
+    if (messageId) {
+      logInfo(`[NTFY] Message sent with ID: ${messageId}`);
+    }
     const idTag = pokemonId ? ` [PK:${pokemonId}]` : '';
     logInfo(name ? `[FOUND]${idTag} ${name}${parts.length ? ' • ' + parts.join(' • ') : ''} • ${latF.toFixed(5)},${lngF.toFixed(5)}${body ? ' • ' + body : ''}` : '✔ ntfy sent (Coordinates)');
   } catch (e) {
