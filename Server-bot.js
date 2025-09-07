@@ -321,7 +321,7 @@ async function handleMessageCreate(msg) {
     clickedPokemonQueue.push(meta);
     const quick = extractCoords(reveal.customId);
     if (quick) {
-      const meta2 = clickedPokemonQueue.pop();
+      const meta2 = clickedPokemonQueue.shift();
       return sendNotification(quick[1], quick[2], meta2);
     }
     await msg.clickButton(reveal.customId);
@@ -366,7 +366,6 @@ async function sendNotification(lat, lng, metaOrName) {
       topic: NTFY_TOPIC,
       title: title,
       message: body || ' ',
-      cache: false, // Don't cache the message
       actions: [
         {
           action: "view",
