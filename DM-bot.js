@@ -45,7 +45,8 @@ async function sendNotification(lat, lng, fullMessage) {
     console.log(`Sending notification with direct TalosRoute URL: ${directTalosUrl}`);
 
     try {
-        await fetch(`https://ntfy.sh/${NTFY_TOPIC}`, {
+        const ntfyServer = process.env.NTFY_SERVER || 'https://ntfy.sh';
+        await fetch(`${ntfyServer}/${NTFY_TOPIC}`, {
             method: 'POST',
             body: messageBody,
             headers: {

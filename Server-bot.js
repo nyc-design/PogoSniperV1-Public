@@ -507,7 +507,8 @@ async function sendNotification(lat, lng, metaOrName) {
       ]
     };
     
-    const response = await fetch(`https://ntfy.sh/`, { 
+    const ntfyServer = process.env.NTFY_SERVER || 'https://ntfy.sh';
+    const response = await fetch(`${ntfyServer}/`, { 
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
