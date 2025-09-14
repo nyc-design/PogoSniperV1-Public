@@ -58,9 +58,9 @@ let TARGET_SERVER_ID  = 'YOUR_SERVER_ID_HERE';
 let TARGET_CHANNEL_ID = 'YOUR_CHANNEL_ID_HERE';
 let TARGET_BOT_ID     = 'THE_POKEMON_BOT_ID_HERE';
 
-// Array of Pokemon metadata with timestamps for time-based correlation
-// Each item: { name, level, cp, ivPct, ivAtk, ivDef, ivSta, despawnEpoch, timestamp }
-const pendingPokemonData = [];
+// Pending meta keyed by the original message ID
+// value: { name, level, cp, ivPct, ivAtk, ivDef, ivSta, despawnEpoch }
+const pendingByMsgId = new Map();
 
 // Debug dump control (set env DEBUG_DUMP to a small number to capture more)
 let DEBUG_DUMP_REMAINING = Number(process.env.DEBUG_DUMP ?? 0);
@@ -445,17 +445,18 @@ async function handleMessageCreate(msg) {
       if (!pokemonFilterCanon.has(canonName(pokemonName))) { return logInfo(`[FILTER] Skipping ${pokemonName} (not selected).`); }
     }
     logInfo('[ACTION] Reveal spotted', `(${pokemonName} in server ${msg.guild?.name || 'Unknown'})`);
-    const meta = parseMessageForStats(flatText, Number(msg.createdTimestamp||Date.now()), pokemonName);
-
-    // Store metadata with timestamp for time-based correlation
-    meta.timestamp = Date.now();
-    pendingPokemonData.push(meta);
-    logInfo(`[DEBUG] Stored Pokemon data with timestamp: ${meta.timestamp}`);
+    const meta = parseMessageForStats(
+      flatText,
+      Number(msg.createdTimestamp || Date.now()),
+      pokemonName
+    );
+    pendingByMsgId.set(msg.id, meta);
 
     const quick = extractCoords(reveal.customId);
     if (quick) {
-      // For quick coords, use the metadata we just stored
-      return sendNotification(quick[1], quick[2], meta);
+      const meta2 = pendingByMsgId.get(msg.id) || { name: pokemonName };
+      pendingByMsgId.delete(msg.id);
+      return sendNotification(quick[1], quick[2], meta2);
     }
     await msg.clickButton(reveal.customId);
   } catch (err) {
@@ -527,42 +528,6 @@ async function sendNotification(lat, lng, metaOrName) {
   }
 }
 
-function handleWsMessageCreate(pkt) {
-  try {
-    if (pkt.channel_id !== TARGET_CHANNEL_ID) return;
-    if (pkt.author?.id !== TARGET_BOT_ID) return;
-
-    const flat = flattenGatewayPkt(pkt);
-    const coords = extractCoords(flat);
-    if (coords && pendingPokemonData.length > 0) {
-      // Get the most recent reveal (newest timestamp) since coordinates come from new messages
-      const meta = pendingPokemonData.pop(); // Remove the latest one
-
-      logInfo(`[DEBUG] New coord message, using most recent reveal data for ${meta?.name}`);
-
-      // Enrich with any stats visible in this coordinate message
-      const fresh = parseMessageForStats(flat, Date.now(), meta?.name);
-      const merged = {
-        name: (meta && meta.name) || fresh.name,
-        level: Number.isFinite(meta?.level) ? meta.level : fresh.level,
-        cp: Number.isFinite(meta?.cp) ? meta.cp : fresh.cp,
-        ivPct: Number.isFinite(meta?.ivPct) ? meta.ivPct : fresh.ivPct,
-        ivAtk: Number.isFinite(meta?.ivAtk) ? meta.ivAtk : fresh.ivAtk,
-        ivDef: Number.isFinite(meta?.ivDef) ? meta.ivDef : fresh.ivDef,
-        ivSta: Number.isFinite(meta?.ivSta) ? meta.ivSta : fresh.ivSta,
-        despawnEpoch: meta?.despawnEpoch || fresh.despawnEpoch
-      };
-
-      if (merged.name) {
-        logInfo(`[SUCCESS] Coords for ${merged.name} → ${coords[1]},${coords[2]}`);
-      }
-      sendNotification(coords[1], coords[2], merged);
-    }
-  } catch (err) {
-    logError('[handleWsMessageCreate] error:', err);
-  }
-}
-
 function handleWsMessageUpdate(pkt) {
   try {
     if (pkt.channel_id !== TARGET_CHANNEL_ID) return;
@@ -572,13 +537,9 @@ function handleWsMessageUpdate(pkt) {
     const flat = flattenGatewayPkt(pkt);
     dump('update', toPlainUpdate(pkt));
     const coords = extractCoords(flat);
-    if (coords && pendingPokemonData.length > 0) {
-      // Get the most recent reveal for message updates too
-      const meta = pendingPokemonData.pop();
+    if (coords) {
+      const meta = pendingByMsgId.get(pkt.id || pkt.message?.id || pkt.data?.id);
 
-      logInfo(`[DEBUG] Updated message with coords, using most recent reveal data for ${meta?.name}`);
-
-      // Enrich with any stats visible in this update
       const fresh = parseMessageForStats(flat, Date.now(), meta?.name);
       const merged = {
         name: (meta && meta.name) || fresh.name,
@@ -590,6 +551,8 @@ function handleWsMessageUpdate(pkt) {
         ivSta: Number.isFinite(meta?.ivSta) ? meta.ivSta : fresh.ivSta,
         despawnEpoch: meta?.despawnEpoch || fresh.despawnEpoch
       };
+
+      pendingByMsgId.delete(pkt.id);
 
       if (merged.name) {
         logInfo(`[SUCCESS] Coords for ${merged.name} → ${coords[1]},${coords[2]}`);
@@ -600,6 +563,7 @@ function handleWsMessageUpdate(pkt) {
     logError('[handleWsMessageUpdate] error:', err);
   }
 }
+function handleWsMessageCreate(pkt) {}
 function handleWsInteractionCreate(pkt) {}
 
 // ──────────────────────────────────────────────────────────────────────────────
