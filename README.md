@@ -47,6 +47,9 @@ PORT=3000
 4) Windows — easiest way
 - Double‑click `start.bat`. It launches backend (port 4000) and frontend (port 3000).
 
+4b) Linux/macOS — convenience script
+- Run `./start.sh` to launch backend and frontend. Requires `node` and `npm`. Then open `http://localhost:3000` in your browser.
+
 5) Manual run (all platforms)
 - Terminal A (backend)
 ```
@@ -128,4 +131,3 @@ MIT License
 
 ---
 Built with ❤️ by Shrek
-

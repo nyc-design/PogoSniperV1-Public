@@ -58,9 +58,9 @@ let TARGET_SERVER_ID  = 'YOUR_SERVER_ID_HERE';
 let TARGET_CHANNEL_ID = 'YOUR_CHANNEL_ID_HERE';
 let TARGET_BOT_ID     = 'THE_POKEMON_BOT_ID_HERE';
 
-// Queue of metadata for pending coordinate reveals
-// Each item: { name, level, cp, ivPct, ivAtk, ivDef, ivSta, despawnEpoch }
-const clickedPokemonQueue = [];
+// Pending meta keyed by the original message ID
+// value: { name, level, cp, ivPct, ivAtk, ivDef, ivSta, despawnEpoch }
+const pendingByMsgId = new Map();
 
 // Debug dump control (set env DEBUG_DUMP to a small number to capture more)
 let DEBUG_DUMP_REMAINING = Number(process.env.DEBUG_DUMP ?? 0);
@@ -84,32 +84,143 @@ client.on('error', err => logError('[CLIENT ERROR]', err.stack || err));
 client.ws.on('error', err => logError('[WS ERROR]', err.stack || err));
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Regex & Text Helpers
+// Regex & Text Helpers (form/accents-robust)
 // ──────────────────────────────────────────────────────────────────────────────
 const coordsRx = /(-?\d{1,3}\.\d+)[\s,\/]+(-?\d{1,3}\.\d+)/;
+// We match bolded names after normalization; keep charset modest (40 chars cap).
 const pokemonBoldRx = /\*\*([A-Za-z0-9 .'\u2019♀♂:-]{1,40})\*\*/;
-const stripAccents = (str = '') => str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-const canonName = (str = '') => stripAccents(String(str)).toLowerCase().replace(/♀/g, 'f').replace(/♂/g, 'm').replace(/[^a-z0-9fm]/g, '');
-function extractCoords(s) { return s && typeof s === 'string' ? s.match(coordsRx) : null; }
+
+const stripAccents = (str = '') =>
+  str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+const canonName = (str = '') =>
+  stripAccents(String(str))
+    .toLowerCase()
+    .replace(/♀/g, 'f')
+    .replace(/♂/g, 'm')
+    .replace(/[^a-z0-9fm]/g, '');
+
+// Remove emoji, exotic punctuation; collapse whitespace; strip accents.
+function normalizeFreeText(s = '') {
+  let t = String(s)
+    .normalize('NFKD')
+    // strip most emoji blocks
+    .replace(/[\u{1F300}-\u{1FAFF}]/gu, '')
+    // general punctuation → space
+    .replace(/[\u2000-\u206F]/g, ' ')
+    .replace(/[•·]/g, ' ')
+    .replace(/[–—]/g, '-')
+    .replace(/[“”]/g, '"')
+    .replace(/[’']/g, "'");
+  t = stripAccents(t);
+  t = t.replace(/\s+/g, ' ').trim();
+  return t;
+}
+
+function extractCoords(s) {
+  return s && typeof s === 'string' ? s.match(coordsRx) : null;
+}
+
+// Build name regex lazily from the known Pokédex names (and their ASCII variants).
+// Depends on pokemonNameToIdMap being populated (your Pokédex section).
+let _NAME_RX = null;
+let _NAME_WITH_FORM_RX = null;
+
+function escapeRx(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function getNameRegexes() {
+  if (_NAME_RX && _NAME_WITH_FORM_RX) return { base: _NAME_RX, withForm: _NAME_WITH_FORM_RX };
+
+  // Prefer map keys if available; else fall back to a tiny list to avoid crashes.
+  const baseNames = pokemonNameToIdMap
+    ? Array.from(pokemonNameToIdMap.keys())
+    : ['Bulbasaur', 'Charmander', 'Squirtle', 'Pikachu', 'Mewtwo', 'Mew'];
+
+  // Add ASCII (accent-stripped) variants and de-dupe
+  const asciiNames = baseNames.map(stripAccents);
+  const variants = Array.from(new Set([...baseNames, ...asciiNames]));
+
+  // Longer first to avoid partials (e.g., "Mr Mime" vs "Mime")
+  variants.sort((a, b) => b.length - a.length);
+
+  // Allow space or hyphen between tokens, e.g., "Mr Mime" vs "Mr-Mime"
+  const union = variants
+    .map(n => escapeRx(n).replace(/\s+/g, '[\\s-]?'))
+    .join('|');
+
+  // Capture group 1 = the base name that matched
+  _NAME_RX = new RegExp('\\b(' + union + ')\\b', 'i');
+
+  // Same, but allow an optional " (Form...)" immediately after the name
+  // e.g., "Flabebe (Blue)" → capture "Flabebe"
+  _NAME_WITH_FORM_RX = new RegExp('\\b(' + union + ')\\b\\s*\\([^)]*\\)?', 'i');
+
+  return { base: _NAME_RX, withForm: _NAME_WITH_FORM_RX };
+}
 
 function extractPokemonNameSmart(text) {
   if (!text) return null;
-  const boldMatch = text.match(pokemonBoldRx);
+  const textNorm = normalizeFreeText(text);
+  const { base: NAME_RX, withForm: NAME_WITH_FORM_RX } = getNameRegexes();
+
+  // Bold fast-path (normalize, then strip a trailing "(Form)")
+  const boldMatch = textNorm.match(pokemonBoldRx);
   if (boldMatch && boldMatch[1]) {
-    const potentialName = boldMatch[1].trim();
-    if (pokemonNameToIdMap.has(potentialName)) {
-        return potentialName;
-    }
+    const potential = boldMatch[1].trim().replace(/\s*\([^)]*\)\s*$/, '');
+    if (pokemonNameToIdMap?.has(potential)) return potential;
   }
-  const regexMatch = text.match(POKEMON_NAME_REGEX);
-  if (regexMatch && regexMatch[1]) {
-    return regexMatch[1].trim();
-  }
+
+  // Prefer matching "Name (Form)" so we can return the base name (group 1)
+  const formMatch = textNorm.match(NAME_WITH_FORM_RX);
+  if (formMatch && formMatch[1]) return formMatch[1].trim();
+
+  // Fallback: plain base name
+  const rxMatch = textNorm.match(NAME_RX);
+  if (rxMatch && rxMatch[1]) return rxMatch[1].trim();
+
   return null;
 }
 
-function flattenMessageLike(src = {}) { const out = []; if (src.author?.name) out.push(src.author.name); if (src.content) out.push(src.content); if (src.title) out.push(src.title); if (src.description) out.push(src.description); for (const e of (src.embeds || [])) { if (e.author?.name) out.push(e.author.name); if (e.title) out.push(e.title); if (e.description) out.push(e.description); if (e.footer?.text) out.push(e.footer.text); if (e.url) out.push(e.url); for (const f of (e.fields || [])) { if (f.name) out.push(f.name); if (f.value) out.push(f.value); } } for (const r of (src.components || [])) { for (const c of (r.components || [])) { if (c.url) out.push(c.url); if (c.custom_id) out.push(c.custom_id); if (c.label) out.push(c.label); } } return out.filter(Boolean).join(' '); }
-function flattenGatewayPkt(pkt = {}) { const out = []; if (pkt.content) out.push(pkt.content); if (pkt.data) out.push(flattenMessageLike(pkt.data)); if (pkt.message) out.push(flattenMessageLike(pkt.message)); if (pkt.embeds) out.push(flattenMessageLike({ embeds: pkt.embeds })); return out.filter(Boolean).join(' '); }
+function flattenMessageLike(src = {}) {
+  const out = [];
+  if (src.author?.name) out.push(src.author.name);
+  if (src.content) out.push(src.content);
+  if (src.title) out.push(src.title);
+  if (src.description) out.push(src.description);
+
+  for (const e of (src.embeds || [])) {
+    if (e.author?.name) out.push(e.author.name);
+    if (e.title) out.push(e.title);
+    if (e.description) out.push(e.description);
+    if (e.footer?.text) out.push(e.footer.text);
+    if (e.url) out.push(e.url);
+    for (const f of (e.fields || [])) {
+      if (f.name) out.push(f.name);
+      if (f.value) out.push(f.value);
+    }
+  }
+
+  for (const r of (src.components || [])) {
+    for (const c of (r.components || [])) {
+      if (c.url) out.push(c.url);
+      if (c.custom_id) out.push(c.custom_id);
+      if (c.label) out.push(c.label);
+    }
+  }
+
+  return out.filter(Boolean).join(' ');
+}
+
+function flattenGatewayPkt(pkt = {}) {
+  const out = [];
+  if (pkt.content) out.push(pkt.content);
+  if (pkt.data) out.push(flattenMessageLike(pkt.data));
+  if (pkt.message) out.push(flattenMessageLike(pkt.message));
+  if (pkt.embeds) out.push(flattenMessageLike({ embeds: pkt.embeds }));
+  return out.filter(Boolean).join(' ');
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Parsing helpers for stats and despawn from Discord messages
@@ -209,6 +320,23 @@ function sanitizeHeaderValue(str = '') {
   // Remove CR/LF and control chars
   s = s.replace(/[\r\n\t]/g, ' ');
   return s.trim();
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Distance helper (km) for geofence
+// ──────────────────────────────────────────────────────────────────────────────
+function haversineDistance(coord1, coord2) {
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const [lat1, lon1] = coord1;
+  const [lat2, lon2] = coord2;
+  const R = 6371; // km
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+    Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -317,11 +445,17 @@ async function handleMessageCreate(msg) {
       if (!pokemonFilterCanon.has(canonName(pokemonName))) { return logInfo(`[FILTER] Skipping ${pokemonName} (not selected).`); }
     }
     logInfo('[ACTION] Reveal spotted', `(${pokemonName} in server ${msg.guild?.name || 'Unknown'})`);
-    const meta = parseMessageForStats(flatText, Number(msg.createdTimestamp||Date.now()), pokemonName);
-    clickedPokemonQueue.push(meta);
+    const meta = parseMessageForStats(
+      flatText,
+      Number(msg.createdTimestamp || Date.now()),
+      pokemonName
+    );
+    pendingByMsgId.set(msg.id, meta);
+
     const quick = extractCoords(reveal.customId);
     if (quick) {
-      const meta2 = clickedPokemonQueue.shift();
+      const meta2 = pendingByMsgId.get(msg.id) || { name: pokemonName };
+      pendingByMsgId.delete(msg.id);
       return sendNotification(quick[1], quick[2], meta2);
     }
     await msg.clickButton(reveal.customId);
@@ -404,8 +538,8 @@ function handleWsMessageUpdate(pkt) {
     dump('update', toPlainUpdate(pkt));
     const coords = extractCoords(flat);
     if (coords) {
-      const meta = clickedPokemonQueue.shift();
-      // Enrich with any stats visible in this update
+      const meta = pendingByMsgId.get(pkt.id); // match by message id
+
       const fresh = parseMessageForStats(flat, Date.now(), meta?.name);
       const merged = {
         name: (meta && meta.name) || fresh.name,
@@ -417,6 +551,8 @@ function handleWsMessageUpdate(pkt) {
         ivSta: Number.isFinite(meta?.ivSta) ? meta.ivSta : fresh.ivSta,
         despawnEpoch: meta?.despawnEpoch || fresh.despawnEpoch
       };
+
+      pendingByMsgId.delete(pkt.id);
 
       if (merged.name) {
         logInfo(`[SUCCESS] Coords for ${merged.name} → ${coords[1]},${coords[2]}`);
