@@ -58,9 +58,9 @@ let TARGET_SERVER_ID  = 'YOUR_SERVER_ID_HERE';
 let TARGET_CHANNEL_ID = 'YOUR_CHANNEL_ID_HERE';
 let TARGET_BOT_ID     = 'THE_POKEMON_BOT_ID_HERE';
 
-// Array of Pokemon metadata with timestamps for time-based correlation
-// Each item: { name, level, cp, ivPct, ivAtk, ivDef, ivSta, despawnEpoch, timestamp }
-const pendingPokemonData = [];
+// Map of original message IDs to Pokemon metadata for reply-based correlation
+// Key: original message ID, Value: { name, level, cp, ivPct, ivAtk, ivDef, ivSta, despawnEpoch }
+const pendingPokemonData = new Map();
 
 // Debug dump control (set env DEBUG_DUMP to a small number to capture more)
 let DEBUG_DUMP_REMAINING = Number(process.env.DEBUG_DUMP ?? 0);
@@ -447,10 +447,8 @@ async function handleMessageCreate(msg) {
     logInfo('[ACTION] Reveal spotted', `(${pokemonName} in server ${msg.guild?.name || 'Unknown'})`);
     const meta = parseMessageForStats(flatText, Number(msg.createdTimestamp||Date.now()), pokemonName);
 
-    // Store metadata with timestamp for time-based correlation
-    meta.timestamp = Date.now();
-    pendingPokemonData.push(meta);
-    logInfo(`[DEBUG] Stored Pokemon data with timestamp: ${meta.timestamp}`);
+    // Store metadata using original message ID for reply-based correlation
+    pendingPokemonData.set(msg.id, meta);
 
     const quick = extractCoords(reveal.customId);
     if (quick) {
@@ -534,29 +532,42 @@ function handleWsMessageCreate(pkt) {
 
     const flat = flattenGatewayPkt(pkt);
     const coords = extractCoords(flat);
-    if (coords && pendingPokemonData.length > 0) {
-      // Get the most recent reveal (newest timestamp) since coordinates come from new messages
-      const meta = pendingPokemonData.pop(); // Remove the latest one
+    if (coords) {
+      // Check if this is a reply to an original message we have metadata for
+      const replyToId = pkt.message_reference?.message_id || pkt.referenced_message?.id;
+      let meta = null;
 
-      logInfo(`[DEBUG] New coord message, using most recent reveal data for ${meta?.name}`);
-
-      // Enrich with any stats visible in this coordinate message
-      const fresh = parseMessageForStats(flat, Date.now(), meta?.name);
-      const merged = {
-        name: (meta && meta.name) || fresh.name,
-        level: Number.isFinite(meta?.level) ? meta.level : fresh.level,
-        cp: Number.isFinite(meta?.cp) ? meta.cp : fresh.cp,
-        ivPct: Number.isFinite(meta?.ivPct) ? meta.ivPct : fresh.ivPct,
-        ivAtk: Number.isFinite(meta?.ivAtk) ? meta.ivAtk : fresh.ivAtk,
-        ivDef: Number.isFinite(meta?.ivDef) ? meta.ivDef : fresh.ivDef,
-        ivSta: Number.isFinite(meta?.ivSta) ? meta.ivSta : fresh.ivSta,
-        despawnEpoch: meta?.despawnEpoch || fresh.despawnEpoch
-      };
-
-      if (merged.name) {
-        logInfo(`[SUCCESS] Coords for ${merged.name} → ${coords[1]},${coords[2]}`);
+      if (replyToId && pendingPokemonData.has(replyToId)) {
+        meta = pendingPokemonData.get(replyToId);
+        pendingPokemonData.delete(replyToId); // Clean up after use
+      } else if (pendingPokemonData.size > 0) {
+        // Fallback to most recent if no reply correlation found
+        const keys = Array.from(pendingPokemonData.keys());
+        const latestKey = keys[keys.length - 1];
+        meta = pendingPokemonData.get(latestKey);
+        pendingPokemonData.delete(latestKey);
+        logInfo(`[DEBUG] No reply found, using latest: ${latestKey} → ${meta?.name}`);
       }
-      sendNotification(coords[1], coords[2], merged);
+
+      if (meta) {
+        // Enrich with any stats visible in this coordinate message
+        const fresh = parseMessageForStats(flat, Date.now(), meta?.name);
+        const merged = {
+          name: (meta && meta.name) || fresh.name,
+          level: Number.isFinite(meta?.level) ? meta.level : fresh.level,
+          cp: Number.isFinite(meta?.cp) ? meta.cp : fresh.cp,
+          ivPct: Number.isFinite(meta?.ivPct) ? meta.ivPct : fresh.ivPct,
+          ivAtk: Number.isFinite(meta?.ivAtk) ? meta.ivAtk : fresh.ivAtk,
+          ivDef: Number.isFinite(meta?.ivDef) ? meta.ivDef : fresh.ivDef,
+          ivSta: Number.isFinite(meta?.ivSta) ? meta.ivSta : fresh.ivSta,
+          despawnEpoch: meta?.despawnEpoch || fresh.despawnEpoch
+        };
+
+        if (merged.name) {
+          logInfo(`[SUCCESS] Coords for ${merged.name} → ${coords[1]},${coords[2]}`);
+        }
+        sendNotification(coords[1], coords[2], merged);
+      }
     }
   } catch (err) {
     logError('[handleWsMessageCreate] error:', err);
@@ -572,29 +583,49 @@ function handleWsMessageUpdate(pkt) {
     const flat = flattenGatewayPkt(pkt);
     dump('update', toPlainUpdate(pkt));
     const coords = extractCoords(flat);
-    if (coords && pendingPokemonData.length > 0) {
-      // Get the most recent reveal for message updates too
-      const meta = pendingPokemonData.pop();
+    if (coords) {
+      // Check for reply reference in message updates too
+      const replyToId = pkt.message_reference?.message_id || pkt.referenced_message?.id ||
+                        pkt.data?.message_reference?.message_id || pkt.data?.referenced_message?.id;
+      let meta = null;
 
-      logInfo(`[DEBUG] Updated message with coords, using most recent reveal data for ${meta?.name}`);
-
-      // Enrich with any stats visible in this update
-      const fresh = parseMessageForStats(flat, Date.now(), meta?.name);
-      const merged = {
-        name: (meta && meta.name) || fresh.name,
-        level: Number.isFinite(meta?.level) ? meta.level : fresh.level,
-        cp: Number.isFinite(meta?.cp) ? meta.cp : fresh.cp,
-        ivPct: Number.isFinite(meta?.ivPct) ? meta.ivPct : fresh.ivPct,
-        ivAtk: Number.isFinite(meta?.ivAtk) ? meta.ivAtk : fresh.ivAtk,
-        ivDef: Number.isFinite(meta?.ivDef) ? meta.ivDef : fresh.ivDef,
-        ivSta: Number.isFinite(meta?.ivSta) ? meta.ivSta : fresh.ivSta,
-        despawnEpoch: meta?.despawnEpoch || fresh.despawnEpoch
-      };
-
-      if (merged.name) {
-        logInfo(`[SUCCESS] Coords for ${merged.name} → ${coords[1]},${coords[2]}`);
+      if (replyToId && pendingPokemonData.has(replyToId)) {
+        meta = pendingPokemonData.get(replyToId);
+        pendingPokemonData.delete(replyToId);
+      } else if (pendingPokemonData.size > 0) {
+        // Fallback to most recent pending data
+        const keys = Array.from(pendingPokemonData.keys());
+        const latestKey = keys[keys.length - 1];
+        meta = pendingPokemonData.get(latestKey);
+        pendingPokemonData.delete(latestKey);
+        logInfo(`[DEBUG] No reply in update, available refs: ${JSON.stringify({
+          msg_ref: pkt.message_reference?.message_id,
+          ref_msg: pkt.referenced_message?.id,
+          data_msg_ref: pkt.data?.message_reference?.message_id,
+          data_ref_msg: pkt.data?.referenced_message?.id
+        })}`);
+        logInfo(`[DEBUG] Updated message with coords, using latest: ${latestKey} → ${meta?.name}`);
       }
-      sendNotification(coords[1], coords[2], merged);
+
+      if (meta) {
+        // Enrich with any stats visible in this update
+        const fresh = parseMessageForStats(flat, Date.now(), meta?.name);
+        const merged = {
+          name: (meta && meta.name) || fresh.name,
+          level: Number.isFinite(meta?.level) ? meta.level : fresh.level,
+          cp: Number.isFinite(meta?.cp) ? meta.cp : fresh.cp,
+          ivPct: Number.isFinite(meta?.ivPct) ? meta.ivPct : fresh.ivPct,
+          ivAtk: Number.isFinite(meta?.ivAtk) ? meta.ivAtk : fresh.ivAtk,
+          ivDef: Number.isFinite(meta?.ivDef) ? meta.ivDef : fresh.ivDef,
+          ivSta: Number.isFinite(meta?.ivSta) ? meta.ivSta : fresh.ivSta,
+          despawnEpoch: meta?.despawnEpoch || fresh.despawnEpoch
+        };
+
+        if (merged.name) {
+          logInfo(`[SUCCESS] Coords for ${merged.name} → ${coords[1]},${coords[2]}`);
+        }
+        sendNotification(coords[1], coords[2], merged);
+      }
     }
   } catch (err) {
     logError('[handleWsMessageUpdate] error:', err);
