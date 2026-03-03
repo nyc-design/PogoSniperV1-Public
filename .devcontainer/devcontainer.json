@@ -1,11 +1,16 @@
 {
-  "name": "Dev Environment",
-  "image": "us-central1-docker.pkg.dev/coder-nt/workspace-images/nextjs-dev:latest",
+  "name": "Fullstack Development",
+  "image": "ghcr.io/nyc-design/workspace-images/nextjs-dev:latest",
+  "features": {},
   "customizations": {
     "vscode": {
       "settings": {
-        "workbench.colorTheme": "Default Dark Modern"
+        "workbench.colorTheme": "Default Dark Modern",
+        "typescript.preferences.quoteStyle": "double",
+        "python.defaultInterpreterPath": "/usr/local/bin/python"
       }
     }
-  }
+  },
+  "forwardPorts": [],
+  "postCreateCommand": ""
 }
