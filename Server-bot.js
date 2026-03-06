@@ -48,19 +48,32 @@ const logError = (...a) => logger.error(a.join(' '));
 // Env Vars & IDs
 // ──────────────────────────────────────────────────────────────────────────────
 const TOKEN      = process.env.DISCORD_TOKEN;
-const NTFY_TOPIC = process.env.NTFY_TOKEN;
 const FAIL_FAST  = /^true$/i.test(process.env.FAIL_FAST || '');
+const LOCATION_POST_URL = process.env.LOCATION_POST_URL || 'http://127.0.0.1:8001/location';
+const LOCATION_CLIENT_ID = process.env.LOCATION_CLIENT_ID || 'ios-app';
+const LOCATION_ALTITUDE = Number.isFinite(Number(process.env.LOCATION_ALTITUDE)) ? Number(process.env.LOCATION_ALTITUDE) : 10.0;
+const LOCATION_SPEED_KNOTS = Number.isFinite(Number(process.env.LOCATION_SPEED_KNOTS)) ? Number(process.env.LOCATION_SPEED_KNOTS) : 0.0;
+const LOCATION_HEADING = Number.isFinite(Number(process.env.LOCATION_HEADING)) ? Number(process.env.LOCATION_HEADING) : 0.0;
+const LOCATION_QUEUE_MAX = Math.max(1, Number(process.env.LOCATION_QUEUE_MAX || 500) || 500);
+const LOCATION_QUEUE_PRUNE_INTERVAL_MS = Math.max(1000, Number(process.env.LOCATION_QUEUE_PRUNE_INTERVAL_MS || 10000) || 10000);
+const STARTUP_REVEAL_BACKFILL_LIMIT = Math.max(0, Number(process.env.STARTUP_REVEAL_BACKFILL_LIMIT || 5) || 5);
+const STARTUP_REVEAL_BACKFILL_DELAY_MS = Math.max(0, Number(process.env.STARTUP_REVEAL_BACKFILL_DELAY_MS || 250) || 250);
 
 if (!TOKEN)      logWarn('[WARN] DISCORD_TOKEN missing; login will fail.');
-if (!NTFY_TOPIC) logWarn('[WARN] NTFY_TOKEN missing; notifications disabled.');
+if (!LOCATION_POST_URL) logWarn('[WARN] LOCATION_POST_URL missing; queue dispatch will fail.');
 
-let TARGET_SERVER_ID  = 'YOUR_SERVER_ID_HERE';
-let TARGET_CHANNEL_ID = 'YOUR_CHANNEL_ID_HERE';
-let TARGET_BOT_ID     = 'THE_POKEMON_BOT_ID_HERE';
+const TARGET_SERVER_ID_ENV  = process.env.TARGET_SERVER_ID || '';
+const TARGET_CHANNEL_ID_ENV = process.env.TARGET_CHANNEL_ID || '';
+const TARGET_BOT_ID_ENV     = process.env.TARGET_BOT_ID || '';
+let TARGET_SERVER_ID  = TARGET_SERVER_ID_ENV || 'YOUR_SERVER_ID_HERE';
+let TARGET_CHANNEL_ID = TARGET_CHANNEL_ID_ENV || 'YOUR_CHANNEL_ID_HERE';
+let TARGET_BOT_ID     = TARGET_BOT_ID_ENV || 'THE_POKEMON_BOT_ID_HERE';
 
 // Map of original message IDs to Pokemon metadata for reply-based correlation
 // Key: original message ID, Value: { name, level, cp, ivPct, ivAtk, ivDef, ivSta, despawnEpoch }
 const pendingPokemonData = new Map();
+const locationQueue = [];
+let backfillInProgress = false;
 
 // Debug dump control (set env DEBUG_DUMP to a small number to capture more)
 let DEBUG_DUMP_REMAINING = Number(process.env.DEBUG_DUMP ?? 0);
@@ -307,21 +320,6 @@ function formatDespawn(despawnEpoch){
   return `Despawns in ${m}m${s?` ${s}s`:''} (${hhmm})`;
 }
 
-// Replace characters that are illegal in HTTP header values
-function sanitizeHeaderValue(str = '') {
-  // Replace common non-ASCII separators with ASCII equivalents
-  let s = String(str)
-    .replace(/[•·]/g, '|')
-    .replace(/[–—]/g, '-')
-    .replace(/[“”]/g, '"')
-    .replace(/[’']/g, "'");
-  // Drop all other non-ASCII to keep Node http happy
-  s = s.replace(/[\u0100-\uFFFF]/g, '');
-  // Remove CR/LF and control chars
-  s = s.replace(/[\r\n\t]/g, ' ');
-  return s.trim();
-}
-
 // ──────────────────────────────────────────────────────────────────────────────
 // Distance helper (km) for geofence
 // ──────────────────────────────────────────────────────────────────────────────
@@ -395,9 +393,9 @@ async function loadDiscordIds() {
   try {
     const data = await fsp.readFile(DISCORD_IDS_FILE, 'utf8');
     const ids = JSON.parse(data);
-    if (ids.serverId) TARGET_SERVER_ID = ids.serverId;
-    if (ids.channelId) TARGET_CHANNEL_ID = ids.channelId;
-    if (ids.botId) TARGET_BOT_ID = ids.botId;
+    if (!TARGET_SERVER_ID_ENV && ids.serverId) TARGET_SERVER_ID = ids.serverId;
+    if (!TARGET_CHANNEL_ID_ENV && ids.channelId) TARGET_CHANNEL_ID = ids.channelId;
+    if (!TARGET_BOT_ID_ENV && ids.botId) TARGET_BOT_ID = ids.botId;
     logInfo(`[INFO] Discord IDs loaded: Server=${TARGET_SERVER_ID}, Channel=${TARGET_CHANNEL_ID}, Bot=${TARGET_BOT_ID}`);
   } catch (err) {
     if (err.code === 'ENOENT') logWarn('[WARN] discord_ids.json not found. Please update IDs in the UI.');
@@ -461,12 +459,132 @@ async function handleMessageCreate(msg) {
   }
 }
 
+function queueItemToApi(item) {
+  if (!item) return null;
+  return {
+    id: item.id,
+    latitude: item.latitude,
+    longitude: item.longitude,
+    queuedAt: item.queuedAt,
+    name: item.meta?.name || null,
+    level: Number.isFinite(item.meta?.level) ? item.meta.level : null,
+    cp: Number.isFinite(item.meta?.cp) ? item.meta.cp : null,
+    ivPct: Number.isFinite(item.meta?.ivPct) ? Math.round(item.meta.ivPct * 10) / 10 : null,
+    despawnEpoch: Number.isFinite(item.meta?.despawnEpoch) ? item.meta.despawnEpoch : null
+  };
+}
+
+function isQueueItemExpired(item, nowMs = Date.now()) {
+  if (!item) return true;
+  const despawnEpoch = Number(item.meta?.despawnEpoch);
+  if (!Number.isFinite(despawnEpoch)) return false;
+  return nowMs >= despawnEpoch;
+}
+
+function queueCoordKey(item) {
+  const lat = Number(item?.latitude);
+  const lng = Number(item?.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return 'invalid';
+  return `${lat.toFixed(6)},${lng.toFixed(6)}`;
+}
+
+function pruneExpiredQueue(source = 'manual') {
+  if (!locationQueue.length) return 0;
+  const nowMs = Date.now();
+  let removedExpired = 0;
+  let removedDuplicate = 0;
+  const seenCoords = new Set();
+  for (let i = locationQueue.length - 1; i >= 0; i -= 1) {
+    const item = locationQueue[i];
+    if (isQueueItemExpired(item, nowMs)) {
+      locationQueue.splice(i, 1);
+      removedExpired += 1;
+      continue;
+    }
+    const key = queueCoordKey(item);
+    if (seenCoords.has(key)) {
+      locationQueue.splice(i, 1);
+      removedDuplicate += 1;
+      continue;
+    }
+    seenCoords.add(key);
+  }
+  const removed = removedExpired + removedDuplicate;
+  if (removed > 0) {
+    logInfo(`[QUEUE] Pruned despawned=${removedExpired} duplicate=${removedDuplicate} via ${source}. Remaining=${locationQueue.length}`);
+  }
+  return removed;
+}
+
+function getLocationQueueState() {
+  pruneExpiredQueue('state');
+  const newest = locationQueue.length ? locationQueue[locationQueue.length - 1] : null;
+  const oldest = locationQueue.length ? locationQueue[0] : null;
+  return {
+    size: locationQueue.length,
+    maxSize: LOCATION_QUEUE_MAX,
+    pruneBy: 'despawnEpoch',
+    newest: queueItemToApi(newest),
+    oldest: queueItemToApi(oldest)
+  };
+}
+
+function parseJsonOrText(raw) {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}
+
+async function dispatchLocationItem(item) {
+  const payload = {
+    client_id: LOCATION_CLIENT_ID,
+    latitude: item.latitude,
+    longitude: item.longitude,
+    altitude: LOCATION_ALTITUDE,
+    speed_knots: LOCATION_SPEED_KNOTS,
+    heading: LOCATION_HEADING
+  };
+
+  const response = await fetch(LOCATION_POST_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const rawBody = await response.text();
+  const parsedBody = parseJsonOrText(rawBody);
+  if (!response.ok) {
+    const bodyText = typeof parsedBody === 'string' ? parsedBody : JSON.stringify(parsedBody);
+    throw new Error(`Location API ${response.status}: ${bodyText || response.statusText}`);
+  }
+  return parsedBody;
+}
+
+async function sendNextQueuedLocation() {
+  pruneExpiredQueue('next');
+  if (!locationQueue.length) {
+    return { ok: false, status: 404, message: 'Queue is empty.' };
+  }
+  const newest = locationQueue[locationQueue.length - 1];
+  try {
+    const locationResponse = await dispatchLocationItem(newest);
+    locationQueue.pop();
+    logInfo(`[QUEUE] Dispatched ${newest.latitude.toFixed(5)},${newest.longitude.toFixed(5)}. Remaining=${locationQueue.length}`);
+    return { ok: true, item: newest, locationResponse };
+  } catch (err) {
+    return { ok: false, status: 502, message: err?.message || String(err), item: newest };
+  }
+}
+
 async function sendNotification(lat, lng, metaOrName) {
+  pruneExpiredQueue('enqueue-pre');
   const latF = Number(lat); const lngF = Number(lng);
-  if (Number.isNaN(latF) || Number.isNaN(lngF)) return logWarn('[NTFY] Invalid coords; skipping.');
+  if (Number.isNaN(latF) || Number.isNaN(lngF)) return logWarn('[QUEUE] Invalid coords; skipping.');
   if (GEOFENCE_CENTER && GEOFENCE_RADIUS_KM > 0 && validateCoordPair(GEOFENCE_CENTER)) {
     const dist = haversineDistance(GEOFENCE_CENTER, [latF, lngF]);
-    if (dist > GEOFENCE_RADIUS_KM) return logInfo(`[FOUND] ${latF.toFixed(5)},${lngF.toFixed(5)} → Outside geofence. Not sent.`);
+    if (dist > GEOFENCE_RADIUS_KM) return logInfo(`[FOUND] ${latF.toFixed(5)},${lngF.toFixed(5)} → Outside geofence. Not queued.`);
   }
 
   const meta = (metaOrName && typeof metaOrName === 'object') ? metaOrName : { name: metaOrName };
@@ -474,55 +592,99 @@ async function sendNotification(lat, lng, metaOrName) {
   const parts = [];
   if (Number.isFinite(meta.level)) parts.push(`L${meta.level}`);
   if (Number.isFinite(meta.cp))    parts.push(`CP ${meta.cp}`);
-  if (Number.isFinite(meta.ivPct)) parts.push(`${Math.round(meta.ivPct*10)/10}%`);
-  const isHundo = Number.isFinite(meta.ivPct) && Math.round(meta.ivPct) === 100;
-  const titleRaw = name ? `${name}${parts.length ? ' - ' + parts.join(' | ') : ' Found!'}` : 'Coordinates Received!';
-  const title = sanitizeHeaderValue(titleRaw);
-  const body  = (isHundo ? '💯 ' : '') + (formatDespawn(meta?.despawnEpoch) || '');
-  const deep  = `itoolsbt://jumpLocation?lat=${latF}&lng=${lngF}`; // keep existing scheme
+  if (Number.isFinite(meta.ivPct)) parts.push(`${Math.round(meta.ivPct * 10) / 10}%`);
+  const body = formatDespawn(meta?.despawnEpoch) || '';
 
-  if (!NTFY_TOPIC) {
-    logInfo(`[NTFY disabled] ${latF},${lngF} ${title}`);
+  const item = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+    latitude: latF,
+    longitude: lngF,
+    queuedAt: new Date().toISOString(),
+    meta: {
+      name: meta?.name || null,
+      level: Number.isFinite(meta?.level) ? meta.level : null,
+      cp: Number.isFinite(meta?.cp) ? meta.cp : null,
+      ivPct: Number.isFinite(meta?.ivPct) ? meta.ivPct : null,
+      despawnEpoch: Number.isFinite(meta?.despawnEpoch) ? meta.despawnEpoch : null
+    }
+  };
+  locationQueue.push(item);
+  pruneExpiredQueue('enqueue-post');
+  if (locationQueue.length > LOCATION_QUEUE_MAX) {
+    locationQueue.splice(0, locationQueue.length - LOCATION_QUEUE_MAX);
+  }
+
+  logInfo(name
+    ? `[QUEUED] ${name}${parts.length ? ' • ' + parts.join(' • ') : ''} • ${latF.toFixed(5)},${lngF.toFixed(5)}${body ? ' • ' + body : ''} • Queue=${locationQueue.length}`
+    : `[QUEUED] ${latF.toFixed(5)},${lngF.toFixed(5)} • Queue=${locationQueue.length}`);
+}
+
+async function waitForClientReady(timeoutMs = 15000) {
+  if (client.readyAt) return true;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      client.off('ready', onReady);
+      resolve(false);
+    }, timeoutMs);
+    function onReady() {
+      clearTimeout(timer);
+      resolve(true);
+    }
+    client.once('ready', onReady);
+  });
+}
+
+async function processRecentRevealMessages(limit) {
+  if (!Number.isFinite(limit) || limit <= 0) return;
+  if (!TARGET_CHANNEL_ID || TARGET_CHANNEL_ID.includes('YOUR_CHANNEL_ID_HERE')) {
+    logWarn('[BOOTSTRAP] Skipping reveal backfill: TARGET_CHANNEL_ID is not configured.');
     return;
   }
   try {
-    let pokemonId;
-    if (name && pokemonNameToIdMap.has(name)) {
-      pokemonId = pokemonNameToIdMap.get(name);
-      // No attachment/icon to keep notifications text-only as requested
+    const channel = await client.channels.fetch(TARGET_CHANNEL_ID);
+    if (!channel || !channel.messages || typeof channel.messages.fetch !== 'function') {
+      logWarn('[BOOTSTRAP] Skipping reveal backfill: target channel is not a text channel.');
+      return;
     }
-    
-    // Use JSON format with actions array for better iOS linking
-    const payload = {
-      topic: NTFY_TOPIC,
-      title: title,
-      message: body || ' ',
-      actions: [
-        {
-          action: "view",
-          label: "Open Location", 
-          url: deep,
-          clear: true
-        }
-      ]
-    };
-    
-    const ntfyServer = process.env.NTFY_SERVER || 'https://ntfy.sh';
-    const response = await fetch(`${ntfyServer}/`, { 
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    
-    // Get the message ID for potential future reference
-    const messageId = response.headers.get('X-Message-Id');
-    if (messageId) {
-      logInfo(`[NTFY] Message sent with ID: ${messageId}`);
+    const fetched = await channel.messages.fetch({ limit });
+    const recent = Array.from(fetched.values())
+      .sort((a, b) => Number(a.createdTimestamp || 0) - Number(b.createdTimestamp || 0));
+    let candidates = 0;
+    for (const msg of recent) {
+      const hasRevealButton = msg.components
+        ?.flatMap((r) => r.components || [])
+        .some((c) => c.type === 'BUTTON' && c.label?.toLowerCase().includes('reveal'));
+      if (!hasRevealButton) continue;
+      candidates += 1;
+      await handleMessageCreate(msg);
+      if (STARTUP_REVEAL_BACKFILL_DELAY_MS > 0) {
+        await new Promise((resolve) => setTimeout(resolve, STARTUP_REVEAL_BACKFILL_DELAY_MS));
+      }
     }
-    const idTag = pokemonId ? ` [PK:${pokemonId}]` : '';
-    logInfo(name ? `[FOUND]${idTag} ${name}${parts.length ? ' • ' + parts.join(' • ') : ''} • ${latF.toFixed(5)},${lngF.toFixed(5)}${body ? ' • ' + body : ''}` : '✔ ntfy sent (Coordinates)');
-  } catch (e) {
-    logError('✘ ntfy failed:', e);
+    logInfo(`[BOOTSTRAP] Processed ${candidates}/${recent.length} recent messages for reveal backfill.`);
+  } catch (err) {
+    logError('[BOOTSTRAP] Failed to process recent reveal messages:', err);
+  }
+}
+
+async function runRecentRevealBackfill(reason = 'manual') {
+  if (!Number.isFinite(STARTUP_REVEAL_BACKFILL_LIMIT) || STARTUP_REVEAL_BACKFILL_LIMIT <= 0) return false;
+  if (backfillInProgress) {
+    logInfo(`[BOOTSTRAP] Backfill already running. Skip trigger: ${reason}`);
+    return false;
+  }
+  backfillInProgress = true;
+  try {
+    const ready = await waitForClientReady(15000);
+    if (!ready) {
+      logWarn(`[BOOTSTRAP] Client not ready; skipping reveal backfill trigger: ${reason}`);
+      return false;
+    }
+    logInfo(`[BOOTSTRAP] Starting reveal backfill (${STARTUP_REVEAL_BACKFILL_LIMIT}) due to ${reason}.`);
+    await processRecentRevealMessages(STARTUP_REVEAL_BACKFILL_LIMIT);
+    return true;
+  } finally {
+    backfillInProgress = false;
   }
 }
 
@@ -645,13 +807,26 @@ async function main() {
 
   await readPokemonFilter();
   await loadDiscordIds();
+  const pruneTimer = setInterval(() => {
+    pruneExpiredQueue('timer');
+  }, LOCATION_QUEUE_PRUNE_INTERVAL_MS);
+  if (typeof pruneTimer.unref === 'function') pruneTimer.unref();
 
   const GEN_BUCKETS = {};
   for (const p of POKEMON_LIST_FULL) { const g = Number(p.gen) || 0; if (!GEN_BUCKETS[g]) GEN_BUCKETS[g] = []; GEN_BUCKETS[g].push(p.name); }
   logInfo(`[POKEDEX] Built generation buckets: ${Object.keys(GEN_BUCKETS).length} gens.`);
 
   app.get('/api/discord-ids', (req, res) => { res.json({ serverId: TARGET_SERVER_ID, channelId: TARGET_CHANNEL_ID, botId: TARGET_BOT_ID }); });
-  app.post('/api/discord-ids', async (req, res) => { const { serverId, channelId, botId } = req.body; if (!serverId || !channelId || !botId) { return res.status(400).json({ success: false, message: 'All IDs are required.' }); } const ok = await writeDiscordIds({ serverId, channelId, botId }); if (!ok) return res.status(500).json({ success: false, message: 'Failed to save Discord IDs.' }); res.json({ success: true, message: 'Discord IDs saved successfully.' }); });
+  app.post('/api/discord-ids', async (req, res) => {
+    const { serverId, channelId, botId } = req.body;
+    if (!serverId || !channelId || !botId) {
+      return res.status(400).json({ success: false, message: 'All IDs are required.' });
+    }
+    const ok = await writeDiscordIds({ serverId, channelId, botId });
+    if (!ok) return res.status(500).json({ success: false, message: 'Failed to save Discord IDs.' });
+    void runRecentRevealBackfill('discord-ids-update');
+    res.json({ success: true, message: 'Discord IDs saved successfully. Backfill started.' });
+  });
   app.get('/api/geofence', (req, res) => res.json({ center: GEOFENCE_CENTER, radius: GEOFENCE_RADIUS_KM }));
   app.post('/api/geofence', (req, res) => { const { center, radius } = req.body || {}; let centerNum = Array.isArray(center) && center.length === 2 ? center.map(Number).map(n => (Number.isFinite(n) ? n : NaN)) : null; const radiusNum = Number(radius); if (centerNum && validateCoordPair(centerNum) && Number.isFinite(radiusNum)) { GEOFENCE_CENTER = centerNum; GEOFENCE_RADIUS_KM = radiusNum; logInfo(`[API] Geofence updated: Center=${centerNum.join(',')} Radius=${radiusNum}km`); res.json({ success: true, message: 'Geofence updated successfully.' }); } else { res.status(400).json({ success: false, message: 'Invalid geofence data provided.' }); } });
   app.get('/api/filter/pokemon', async (req, res) => { await readPokemonFilter(); res.json(pokemonFilterCache); });
@@ -659,6 +834,26 @@ async function main() {
   app.get('/api/pokemon', (req, res) => { if ((req.query.group || '').toLowerCase() === 'gen') return res.json({ gens: GEN_BUCKETS }); res.json(POKEMON_LIST); });
   app.get('/api/pokedex', (req, res) => { res.json(POKEMON_LIST_FULL); });
   app.get('/api/logs', async (req, res) => { if (req.query.source !== 'file' && logBuffer.length) return res.json(logBuffer); try { const data  = await fsp.readFile(LOG_PATH, 'utf8'); const lines = data.split(/\r?\n/).filter(Boolean).slice(-MAX_LOG_LINES); res.json(lines); } catch (err) { logError('[API] Failed to read log file:', err); res.status(500).json({ error: 'Failed to read log file.' }); } });
+  app.get('/api/location-queue', (req, res) => {
+    res.json(getLocationQueueState());
+  });
+  app.post('/api/location-queue/next', async (req, res) => {
+    const result = await sendNextQueuedLocation();
+    if (!result.ok) {
+      return res.status(result.status || 500).json({
+        success: false,
+        message: result.message || 'Failed to send next queued location.',
+        next: queueItemToApi(result.item),
+        queue: getLocationQueueState()
+      });
+    }
+    return res.json({
+      success: true,
+      sent: queueItemToApi(result.item),
+      locationResponse: result.locationResponse,
+      queue: getLocationQueueState()
+    });
+  });
   app.post('/api/debug/extract', (req, res) => { const fakeMsg = req.body || {}; const flatText = flattenMessageLike(fakeMsg); const name = extractPokemonNameSmart(flatText); res.json({ input: flatText, detected: name }); });
   app.post('/api/shutdown', (req, res) => { logWarn('Shutdown command received from UI. Shutting down...'); res.json({ success: true, message: 'Shutdown initiated.' }); setTimeout(() => { process.exit(0); }, 500); });
   
@@ -670,6 +865,7 @@ async function main() {
   
   logInfo('Attempting to log in to Discord...');
   await client.login(TOKEN);
+  await runRecentRevealBackfill('startup');
 }
 
 main().catch(err => {

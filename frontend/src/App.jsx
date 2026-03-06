@@ -5,6 +5,7 @@ import GeofenceForm  from './components/GeofenceForm.jsx';
 import PokemonFilter from './components/PokemonFilter.jsx';
 import LogsPanel     from './components/LogsPanel.jsx';
 import DiscordIdsForm from './components/DiscordIdsForm.jsx';
+import LocationQueueControl from './components/LocationQueueControl.jsx';
 import ShutdownButton from './components/ShutdownButton.jsx';
 import './components/styles/App.css';
 
@@ -30,6 +31,7 @@ export default function App() {
           <PokemonFilter />
           <GeofenceForm />
           <DiscordIdsForm />
+          <LocationQueueControl />
           <ShutdownButton />
         </aside>
         <section className="app-content">

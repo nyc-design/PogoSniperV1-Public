@@ -1,0 +1,45 @@
+.location-queue-card {
+  border-color: var(--c-info);
+}
+
+.queue-stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--c-text-muted);
+}
+
+.queue-latest {
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm);
+  background: var(--c-bg);
+}
+
+.queue-latest-title {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--c-text-muted);
+  margin-bottom: 4px;
+}
+
+.queue-coords {
+  font-weight: 600;
+}
+
+.queue-meta,
+.queue-time,
+.queue-empty {
+  font-size: 0.85rem;
+  color: var(--c-text-muted);
+}
+
+.queue-actions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.queue-actions button {
+  flex: 1;
+}
