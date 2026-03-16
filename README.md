@@ -1,5 +1,7 @@
 Pogo "Reveal" Self-Bot
 
+> Last updated: March 2026
+
 ![Dashboard](assets/RevampedUI.png)
 ![Filter UI](assets/Uifilterrevamped.png)
 
